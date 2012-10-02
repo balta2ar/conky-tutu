@@ -1,11 +1,11 @@
-## conky-tutu
+### conky-tutu
 
-conky config + python script for viewing schedule from [tutu](www.tutu.ru).
+conky config + python script for viewing schedule from [tutu.ru](http://www.tutu.ru).
 
-## Configuration
+### Configuration
 
 TODO
 
-## Copyright
+### Copyright
 
 (c) Yuri balta2ar Bochkarev, 2012
