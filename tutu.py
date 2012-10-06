@@ -85,13 +85,13 @@ def schedule_to_str(schedule):
 
     # build header
     width = max([len(x) for x in lines])
-    h = '%s -> %s' % (ARGS.dep_station_name, ARGS.arr_station_name)
+    h = '%s → %s' % (ARGS.dep_station_name, ARGS.arr_station_name)
     header = '{:^{width}}'.format(h, width=width)
 
     # build footer
     d = datetime.datetime.fromtimestamp(os.path.getmtime(ARGS.cache_file))
     d = d.replace(microsecond=0)
-    footer = '{:^{width}}'.format('Last refresh: %s' % str(d), width=width)
+    footer = '{:^{width}}'.format('Last schedule refresh: %s' % str(d), width=width)
 
     # find nearest travel
     now = datetime.datetime.now()
@@ -111,7 +111,7 @@ def schedule_to_str(schedule):
 
 def travel_to_str(t, mdep, marr):
     tformat = '%H:%M'
-    template = '{} {} {:>3} {:>3} {:{lalign}{lfill}} -> {:{ralign}{rfill}}'
+    template = '{} {} {:>3} {:>3} {:{lalign}{lfill}} → {:{ralign}{rfill}}'
     rem = t['minutes_remain']
     rem = minutes_to_human(rem) if rem > 0 else '     '
     ARGS = [t['departure_time'].strftime(tformat)
