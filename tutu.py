@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 
+import os
 import sys
 import time
+import bisect
 import datetime
 import argparse
 import urllib.parse
@@ -10,15 +12,22 @@ from html.parser import HTMLParser
 
 TUTU_REQUEST = 'http://www.tutu.ru/rasp.php?%s'
 ARGS = None
+COLORS = {
+      'prev':    '#a67c00'
+    , 'current': '#ffdc73'
+    , 'next':    '#ffcf40'
+    , 'label':   '#bf9b30'
+}
+
+def diff_minutes(t1, t2):
+    return int((t1-t2).total_seconds() / 60)
+
+def minutes_to_human(ts):
+    return '%02d:%02d' % divmod(ts, 60)
 
 # create a subclass and override the handler methods
 class TutuParser(HTMLParser):
     def __init__(self, parse_date):
-        """
-        seq_started - function which looks at the tag data and tells whether
-                      it starts the sequence
-        seq_len     - length of the sequence
-        """
         HTMLParser.__init__(self)
         self.tag_data = ''
         self.in_tag = False
@@ -26,6 +35,7 @@ class TutuParser(HTMLParser):
         self.seq_len = 4
         self.seq_n = 0
         self.schedule = []
+        self.now = datetime.datetime.now()
     def handle_starttag(self, tag, attrs):
         if tag == 'a':
             self.in_tag = True
@@ -39,14 +49,15 @@ class TutuParser(HTMLParser):
                 if date:
                     # start the sequence
                     self.seq_n = self.seq_len - 1
-                    self.travel = {'departure_time': date}
+                    self.travel = {'departure_time': date,
+                                   'minutes_remain': diff_minutes(date, self.now)}
             elif self.seq_n == self.seq_len - 1:
                 self.travel['arrival_time'] = date
                 if date < self.travel['departure_time']:
                     # arrives next day
                     date += datetime.timedelta(days=1)
-                ttime = date - self.travel['departure_time']
-                self.travel['mins_in_travel'] = int(ttime.total_seconds() / 60)
+                self.travel['mins_in_travel'] = diff_minutes(date,
+                    self.travel['departure_time'])
                 self.seq_n -= 1
             elif self.seq_n == self.seq_len - 2:
                 self.travel['departure_station'] = d
@@ -67,16 +78,45 @@ def parse_date(s):
     except ValueError as e: return None
 
 def schedule_to_str(schedule):
+    schedule = schedule[30:]
     max_dep_st = max([len(t['departure_station']) for t in schedule])
     max_arr_st = max([len(t['arrival_station']) for t in schedule])
     lines = [travel_to_str(t, max_dep_st, max_arr_st) for t in schedule]
+
+    # build header
+    width = max([len(x) for x in lines])
+    h = '%s -> %s' % (ARGS.dep_station_name, ARGS.arr_station_name)
+    header = '{:^{width}}'.format(h, width=width)
+
+    # build footer
+    d = datetime.datetime.fromtimestamp(os.path.getmtime(ARGS.cache_file))
+    d = d.replace(microsecond=0)
+    footer = '{:^{width}}'.format('Last refresh: %s' % str(d), width=width)
+
+    # find nearest travel
+    now = datetime.datetime.now()
+    times = [x['departure_time'] for x in schedule]
+    pos = bisect.bisect_right(times, now)
+
+    # build colorized body
+    before, current, after = lines[:pos], \
+        lines[pos] if pos != len(times) else '', \
+        lines[pos+1:]
+    before = ['${color %s}%s${color}' % (COLORS['prev'], x) for x in before]
+    if current: current = '${color %s}%s${color}' % (COLORS['current'], current)
+    after = ['${color %s}%s${color}' % (COLORS['next'], x) for x in after]
+
+    lines = [header] + before + [current] + after + [footer]
     return '\n'.join(lines)
 
 def travel_to_str(t, mdep, marr):
     tformat = '%H:%M'
-    template = '{} {} {:3>} {:{lalign}{lfill}} -> {:{ralign}{rfill}}'
+    template = '{} {} {:>3} {:>3} {:{lalign}{lfill}} -> {:{ralign}{rfill}}'
+    rem = t['minutes_remain']
+    rem = minutes_to_human(rem) if rem > 0 else '     '
     ARGS = [t['departure_time'].strftime(tformat)
           , t['arrival_time'].strftime(tformat)
+          , rem
           , t['mins_in_travel']
           , t['departure_station']
           , t['arrival_station']]
@@ -95,7 +135,13 @@ def print_schedule():
         parse(data)
 
 def process():
-    #print(save_schedule(download_schedule()))
+    ex = os.path.exists(ARGS.cache_file)
+    old = False
+    if ex:
+        tm = os.path.getmtime(ARGS.cache_file)
+        dt = datetime.datetime.fromtimestamp(tm)
+        old = dt.date() != datetime.datetime.today().date()
+    if not ex or old: save_schedule(download_schedule())
     print_schedule()
 
 def download_schedule():
@@ -126,7 +172,7 @@ def main():
 
     global ARGS
     ARGS = parser.parse_args()
-    print(ARGS)
+    #print(ARGS)
 
     process()
     return 0
