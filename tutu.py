@@ -51,23 +51,23 @@ class TutuParser(HTMLParser):
                 if date:
                     # start the sequence
                     self.seq_n = self.seq_len - 1
-                    self.travel = {'departure_time': date,
+                    self.trip = {'departure_time': date,
                                    'minutes_remain': diff_minutes(date, self.now)}
             elif self.seq_n == self.seq_len - 1:
-                self.travel['arrival_time'] = date
-                if date < self.travel['departure_time']:
+                self.trip['arrival_time'] = date
+                if date < self.trip['departure_time']:
                     # arrives next day
                     date += datetime.timedelta(days=1)
-                self.travel['mins_in_travel'] = diff_minutes(date,
-                    self.travel['departure_time'])
+                self.trip['mins_in_trip'] = diff_minutes(date,
+                    self.trip['departure_time'])
                 self.seq_n -= 1
             elif self.seq_n == self.seq_len - 2:
-                self.travel['departure_station'] = d
+                self.trip['departure_station'] = d
                 self.seq_n -= 1
             elif self.seq_n == self.seq_len - 3:
-                self.travel['arrival_station'] = d
+                self.trip['arrival_station'] = d
                 self.seq_n -= 1
-                self.schedule.append(self.travel)
+                self.schedule.append(self.trip)
     def handle_data(self, data):
         if self.in_tag:
             self.tag_data += data
@@ -109,7 +109,7 @@ def current_pos(schedule):
 def schedule_to_str(schedule):
     if len(schedule) == 0: return ''
 
-    # find nearest travel
+    # find nearest trip
     pos = current_pos(schedule)
 
     # filter schedule if necessary
@@ -124,7 +124,7 @@ def schedule_to_str(schedule):
 
     max_dep_st = max([len(t['departure_station']) for t in schedule])
     max_arr_st = max([len(t['arrival_station']) for t in schedule])
-    lines = [travel_to_str(t, max_dep_st, max_arr_st) for t in schedule]
+    lines = [trip_to_str(t, max_dep_st, max_arr_st) for t in schedule]
 
     # build header
     width = max([len(x) for x in lines])
@@ -148,7 +148,7 @@ def schedule_to_str(schedule):
     lines = [header] + before + [current] + after + [footer]
     return '\n'.join(lines)
 
-def travel_to_str(t, mdep, marr):
+def trip_to_str(t, mdep, marr):
     tformat = '%H:%M'
     template = '{} {} {:>3} {:>3} {:{lalign}{lfill}} → {:{ralign}{rfill}}'
     rem = t['minutes_remain']
@@ -156,7 +156,7 @@ def travel_to_str(t, mdep, marr):
     ARGS = [t['departure_time'].strftime(tformat)
           , t['arrival_time'].strftime(tformat)
           , rem
-          , t['mins_in_travel']
+          , t['mins_in_trip']
           , t['departure_station']
           , t['arrival_station']]
     return template.format(*ARGS, lalign='>', lfill=mdep,
@@ -213,11 +213,11 @@ def main():
     parser.add_argument('-d', '--date', type=str, help='Date of schedule', default='today')
     within = parser.add_mutually_exclusive_group()
     within.add_argument('-wr', '--within-range', type=str, help='''Range of
-        travels: N,M - number of travels to show before and after the
-        nearest travel''', default=None)
+        trips: N,M - number of trips to show before and after the
+        nearest trip''', default=None)
     within.add_argument('-wt', '--within-time', type=str, help='''Range of
-        travels: N,M - time range travels to show before and after the
-        nearest travel in format %%H:%%M''', default=None)
+        trips: N,M - time range trips to show before and after the
+        nearest trip in format %%H:%%M''', default=None)
 
     global ARGS
     ARGS = parser.parse_args()
