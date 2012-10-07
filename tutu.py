@@ -13,9 +13,9 @@ from html.parser import HTMLParser
 TUTU_REQUEST = 'http://www.tutu.ru/rasp.php?%s'
 ARGS = None
 COLORS = {
-      'prev':    '#a67c00'
-    , 'current': '#ffdc73'
-    , 'next':    '#ffcf40'
+      'prev':    'a67c00' #'#0E2036'
+    , 'current': '#adbc93'
+    , 'next':    '#7B90A9'
     , 'label':   '#bf9b30'
 }
 
@@ -36,6 +36,8 @@ class TutuParser(HTMLParser):
         self.seq_n = 0
         self.schedule = []
         self.now = datetime.datetime.now()
+    def get_schedule(self):
+        return sorted(self.schedule, key=lambda x: x['departure_time'])
     def handle_starttag(self, tag, attrs):
         if tag == 'a':
             self.in_tag = True
@@ -77,8 +79,49 @@ def parse_date(s):
         return datetime.datetime(*(now[:3] + t[3:6]))
     except ValueError as e: return None
 
+def filter_schedule(s, flt, pos):
+    return [v for (i, v) in enumerate(s) if flt(i, v, pos)]
+
+def make_time_filter(s):
+    now = datetime.datetime.now()
+    a, b = [x.strip() for x in s.split(',')]
+    a, b = datetime.datetime.strptime(a, '%H:%M'), \
+           datetime.datetime.strptime(b, '%H:%M')
+    a, b = datetime.timedelta(hours=a.hour, minutes=a.minute), \
+           datetime.timedelta(hours=b.hour, minutes=b.minute)
+    a, b = now-a, now+b
+    def f(i, v, pos): return a <= v['departure_time'] <= b
+    return f
+
+def make_range_filter(s):
+    a, b = [x.strip() for x in s.split(',')]
+    a, b = int(a), int(b)
+    def f(i, v, pos): return (0 <= pos - i <= a) or (0 <= i - pos <= b)
+    return f
+
+def current_pos(schedule):
+    now = datetime.datetime.now()
+    times = [x['departure_time'] for x in schedule]
+    pos = bisect.bisect_left(times, now)
+    if pos == len(times): pos -= 1
+    return pos
+
 def schedule_to_str(schedule):
-    schedule = schedule[30:]
+    if len(schedule) == 0: return ''
+
+    # find nearest travel
+    pos = current_pos(schedule)
+
+    # filter schedule if necessary
+    flt = None
+    if ARGS.within_range: flt = make_range_filter(ARGS.within_range)
+    elif ARGS.within_time: flt = make_time_filter(ARGS.within_time)
+    if flt: schedule = filter_schedule(schedule, flt, pos)
+    pos = current_pos(schedule)
+
+    # make sure schedule is not empty after filtering
+    if len(schedule) == 0: return ''
+
     max_dep_st = max([len(t['departure_station']) for t in schedule])
     max_arr_st = max([len(t['arrival_station']) for t in schedule])
     lines = [travel_to_str(t, max_dep_st, max_arr_st) for t in schedule]
@@ -93,19 +136,15 @@ def schedule_to_str(schedule):
     d = d.replace(microsecond=0)
     footer = '{:^{width}}'.format('Last schedule refresh: %s' % str(d), width=width)
 
-    # find nearest travel
-    now = datetime.datetime.now()
-    times = [x['departure_time'] for x in schedule]
-    pos = bisect.bisect_right(times, now)
-
     # build colorized body
     before, current, after = lines[:pos], \
-        lines[pos] if pos != len(times) else '', \
+        lines[pos] if pos != len(schedule) else '', \
         lines[pos+1:]
     before = ['${color %s}%s${color}' % (COLORS['prev'], x) for x in before]
     if current: current = '${color %s}%s${color}' % (COLORS['current'], current)
     after = ['${color %s}%s${color}' % (COLORS['next'], x) for x in after]
 
+    # join results
     lines = [header] + before + [current] + after + [footer]
     return '\n'.join(lines)
 
@@ -113,7 +152,7 @@ def travel_to_str(t, mdep, marr):
     tformat = '%H:%M'
     template = '{} {} {:>3} {:>3} {:{lalign}{lfill}} → {:{ralign}{rfill}}'
     rem = t['minutes_remain']
-    rem = minutes_to_human(rem) if rem > 0 else '     '
+    rem = minutes_to_human(rem) if rem >= 0 else '     '
     ARGS = [t['departure_time'].strftime(tformat)
           , t['arrival_time'].strftime(tformat)
           , rem
@@ -127,12 +166,15 @@ def parse(data):
     # instantiate the parser and fed it some HTML
     parser = TutuParser(parse_date)
     parser.feed(data)
-    print(schedule_to_str(parser.schedule))
+    return parser.get_schedule()
+
+def load_schedule(filename):
+    with open(filename, encoding='utf-8') as f:
+        data = f.read()
+        return parse(data)
 
 def print_schedule():
-    with open(ARGS.cache_file, encoding='utf-8') as f:
-        data = f.read()
-        parse(data)
+    print(schedule_to_str(load_schedule(ARGS.cache_file)))
 
 def process():
     ex = os.path.exists(ARGS.cache_file)
@@ -163,16 +205,22 @@ def save_schedule(data):
 
 def main():
     parser = argparse.ArgumentParser(description='Download, parse and prepare for conky tutu schedule.')
-    parser.add_argument('-dsn', '--dep-station-name', type=str, help='departure station name', default='From')
-    parser.add_argument('-dsc', '--dep-station-code', type=str, help='departure station code', required=True)
-    parser.add_argument('-asn', '--arr-station-name', type=str, help='arrival station name', default='To')
-    parser.add_argument('-asc', '--arr-station-code', type=str, help='arrival station code', required=True)
-    parser.add_argument('-cf', '--cache-file', type=str, help='cache file name', default='tutu.html')
-    parser.add_argument('-d', '--date', type=str, help='date', default='today')
+    parser.add_argument('-dsn', '--dep-station-name', type=str, help='Departure station name', default='From')
+    parser.add_argument('-dsc', '--dep-station-code', type=str, help='Departure station code', required=True)
+    parser.add_argument('-asn', '--arr-station-name', type=str, help='Arrival station name', default='To')
+    parser.add_argument('-asc', '--arr-station-code', type=str, help='Arrival station code', required=True)
+    parser.add_argument('-cf', '--cache-file', type=str, help='Cache file name', default='tutu.html')
+    parser.add_argument('-d', '--date', type=str, help='Date of schedule', default='today')
+    within = parser.add_mutually_exclusive_group()
+    within.add_argument('-wr', '--within-range', type=str, help='''Range of
+        travels: N,M - number of travels to show before and after the
+        nearest travel''', default=None)
+    within.add_argument('-wt', '--within-time', type=str, help='''Range of
+        travels: N,M - time range travels to show before and after the
+        nearest travel in format %%H:%%M''', default=None)
 
     global ARGS
     ARGS = parser.parse_args()
-    #print(ARGS)
 
     process()
     return 0
